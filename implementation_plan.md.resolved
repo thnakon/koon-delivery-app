@@ -1,0 +1,417 @@
+# Koon Delivery App — Implementation Plan
+
+แอปสั่งอาหาร/เครื่องดื่ม Delivery ชื่อ **"Koon"** ประกอบด้วย Mobile App (React Native + Expo) และ Backend API (Laravel) — ใช้ MySQL database `koon_db`, push ไปที่ `https://github.com/thnakon/koon-delivery-app`
+
+---
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Monorepo Structure** — แนะนำให้จัด project เป็น monorepo โดยมี `/mobile` (Expo app) และ `/backend` (Laravel) อยู่ในรูท repo เดียวกัน ทำให้ commit + push ได้ครบทั้ง 2 ส่วนใน repo เดียว
+
+> [!IMPORTANT]
+> **Omise API Keys** — ต้องมี Omise Sandbox keys (public + secret) พร้อมก่อนทำ Phase 5 (Payment) สมัครได้ที่ [omise.co](https://www.omise.co)
+
+> [!IMPORTANT]
+> **Pusher Credentials** — ต้องสมัคร Pusher account สำหรับ real-time features (Phase 6) หรือจะใช้ Laravel Reverb แทนก็ได้
+
+> [!WARNING]
+> **Google OAuth Client ID** — สำหรับ Social Login ต้อง setup OAuth credentials ใน Google Cloud Console ก่อน
+
+---
+
+## Project Structure (Monorepo)
+
+```
+koon-delivery-app/
+├── mobile/                    # Expo/React Native App
+│   ├── app/                   # Expo Router v4 (file-based routing)
+│   │   ├── (auth)/            # Auth group
+│   │   │   ├── login.tsx
+│   │   │   └── register.tsx
+│   │   ├── (tabs)/            # Main tab navigation
+│   │   │   ├── _layout.tsx
+│   │   │   ├── index.tsx      # Home / Menu
+│   │   │   ├── cart.tsx
+│   │   │   ├── orders.tsx
+│   │   │   └── profile.tsx
+│   │   ├── menu/[id].tsx      # Menu detail
+│   │   ├── checkout.tsx
+│   │   ├── order/[id].tsx     # Order tracking
+│   │   └── _layout.tsx        # Root layout
+│   ├── components/            # Reusable components
+│   │   ├── ui/                # Gluestack UI wrappers
+│   │   ├── menu/
+│   │   ├── cart/
+│   │   └── order/
+│   ├── stores/                # Zustand stores
+│   │   ├── useAuthStore.ts
+│   │   ├── useCartStore.ts
+│   │   └── useOrderStore.ts
+│   ├── services/              # API layer (Axios + TanStack Query)
+│   │   ├── api.ts             # Axios instance + interceptors
+│   │   ├── auth.ts
+│   │   ├── menu.ts
+│   │   ├── orders.ts
+│   │   └── coupons.ts
+│   ├── hooks/                 # Custom hooks
+│   ├── schemas/               # Zod validation schemas
+│   ├── types/                 # TypeScript types
+│   ├── utils/                 # Helpers
+│   ├── constants/             # App constants
+│   ├── assets/                # Images, fonts
+│   ├── app.json
+│   ├── package.json
+│   └── tsconfig.json
+│
+├── backend/                   # Laravel API
+│   ├── app/
+│   │   ├── Http/
+│   │   │   ├── Controllers/
+│   │   │   │   ├── AuthController.php
+│   │   │   │   ├── MenuController.php
+│   │   │   │   ├── OrderController.php
+│   │   │   │   ├── CouponController.php
+│   │   │   │   ├── PaymentController.php
+│   │   │   │   └── Admin/
+│   │   │   │       ├── MenuController.php
+│   │   │   │       ├── OrderController.php
+│   │   │   │       ├── CouponController.php
+│   │   │   │       └── ReportController.php
+│   │   │   ├── Middleware/
+│   │   │   │   └── IdempotencyMiddleware.php
+│   │   │   └── Requests/
+│   │   │       ├── StoreOrderRequest.php
+│   │   │       └── ...
+│   │   ├── Models/
+│   │   │   ├── User.php
+│   │   │   ├── Category.php
+│   │   │   ├── MenuItem.php
+│   │   │   ├── Order.php
+│   │   │   ├── OrderItem.php
+│   │   │   ├── Coupon.php
+│   │   │   └── CouponUsage.php
+│   │   ├── Events/
+│   │   │   └── OrderStatusUpdated.php
+│   │   ├── Notifications/
+│   │   │   └── OrderReadyNotification.php
+│   │   └── Policies/
+│   ├── database/
+│   │   ├── migrations/
+│   │   └── seeders/
+│   ├── routes/
+│   │   ├── api.php
+│   │   └── channels.php
+│   └── ...
+│
+├── .gitignore
+└── README.md
+```
+
+---
+
+## Proposed Changes
+
+### 1. Mobile App (Expo + React Native)
+
+#### [NEW] `mobile/` — Expo project
+
+**สร้าง project ด้วย:**
+```bash
+npx create-expo-app@latest mobile --template tabs
+```
+
+**Dependencies ที่ต้องติดตั้ง:**
+
+| Category | Package |
+|---|---|
+| UI | `@gluestack-ui/themed` `@gluestack-style/react` `@expo/vector-icons` |
+| Navigation | `expo-router` (v4 มากับ template), `@react-navigation/native` v7 |
+| State | `zustand`, `@tanstack/react-query` v5 |
+| HTTP | `axios`, `expo-secure-store` |
+| Forms | `react-hook-form`, `zod`, `@hookform/resolvers` |
+| Push | `expo-notifications`, `expo-device` |
+| Image | `expo-image`, `expo-image-picker` |
+| Maps | `react-native-maps`, `expo-location` |
+| UX | `@shopify/flash-list`, `react-native-skeleton-placeholder`, `expo-haptics`, `expo-barcode-scanner` |
+
+**หน้าจอหลัก:**
+1. **Login/Register** — React Hook Form + Zod, Social Login (Google), token stored in SecureStore
+2. **Home/Menu** — FlashList + skeleton loading, category filter, search
+3. **Menu Detail** — รูปภาพ, รายละเอียด, ปุ่ม Add to Cart
+4. **Cart** — Zustand store, แก้ไขจำนวน, ลบ, คูปอง
+5. **Checkout** — เลือก Pickup/Delivery, Omise payment, Map picker (delivery)
+6. **Order Tracking** — Countdown timer, queue status, real-time update
+7. **Order History** — รายการออเดอร์ย้อนหลัง
+8. **Profile** — ข้อมูลส่วนตัว, ที่อยู่, logout
+
+---
+
+### 2. Backend (Laravel)
+
+#### [NEW] `backend/` — Laravel project
+
+**สร้าง project ด้วย:**
+```bash
+composer create-project laravel/laravel backend
+```
+
+**Packages เพิ่มเติม:**
+
+| Package | Purpose |
+|---|---|
+| `laravel/sanctum` | Token-based API auth |
+| `pusher/pusher-php-server` | Real-time broadcasting |
+| `spatie/laravel-medialibrary` | Image/media management |
+| `laravel/horizon` | Queue dashboard |
+| `laravel/telescope` | Debug dashboard |
+| `laravel/pint` | Code style |
+
+---
+
+### 3. Database Schema (`koon_db`)
+
+```mermaid
+erDiagram
+    users ||--o{ orders : places
+    users ||--o{ addresses : has
+    categories ||--o{ menu_items : contains
+    menu_items ||--o{ order_items : included_in
+    orders ||--o{ order_items : has
+    orders ||--o| coupons : uses
+    coupons ||--o{ coupon_usages : tracked_by
+
+    users {
+        bigint id PK
+        string name
+        string email UK
+        string phone
+        string password
+        string avatar
+        string google_id
+        enum role "user/admin"
+        string expo_push_token
+        timestamps timestamps
+    }
+
+    addresses {
+        bigint id PK
+        bigint user_id FK
+        string label "บ้าน/ที่ทำงาน"
+        string address_line
+        decimal lat
+        decimal lng
+        boolean is_default
+        timestamps timestamps
+    }
+
+    categories {
+        bigint id PK
+        string name
+        string slug UK
+        string icon
+        int sort_order
+        boolean is_active
+        timestamps timestamps
+    }
+
+    menu_items {
+        bigint id PK
+        bigint category_id FK
+        string name
+        text description
+        decimal price
+        string image_url
+        boolean is_available
+        boolean is_popular
+        int prep_time_minutes
+        timestamps timestamps
+    }
+
+    orders {
+        bigint id PK
+        string order_number UK
+        bigint user_id FK
+        bigint coupon_id FK
+        enum type "pickup/delivery"
+        enum status "pending/confirmed/preparing/ready/delivering/completed/cancelled"
+        decimal subtotal
+        decimal discount
+        decimal delivery_fee
+        decimal total
+        text note
+        string delivery_address
+        decimal delivery_lat
+        decimal delivery_lng
+        int queue_position
+        timestamp estimated_ready_at
+        string payment_method
+        string payment_status
+        string omise_charge_id
+        string idempotency_key UK
+        timestamps timestamps
+    }
+
+    order_items {
+        bigint id PK
+        bigint order_id FK
+        bigint menu_item_id FK
+        int quantity
+        decimal unit_price
+        decimal total_price
+        text special_instructions
+        timestamps timestamps
+    }
+
+    coupons {
+        bigint id PK
+        string code UK
+        enum type "fixed/percentage"
+        decimal value
+        decimal min_order_amount
+        decimal max_discount
+        int usage_limit
+        int used_count
+        timestamp starts_at
+        timestamp expires_at
+        boolean is_active
+        timestamps timestamps
+    }
+
+    coupon_usages {
+        bigint id PK
+        bigint coupon_id FK
+        bigint user_id FK
+        bigint order_id FK
+        timestamps timestamps
+    }
+```
+
+---
+
+### 4. API Endpoints
+
+#### Auth
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/api/auth/register` | สมัครสมาชิก |
+| POST | `/api/auth/login` | เข้าสู่ระบบ |
+| POST | `/api/auth/google` | Google Social Login |
+| POST | `/api/auth/logout` | ออกจากระบบ |
+| GET | `/api/auth/user` | ข้อมูล user ปัจจุบัน |
+
+#### Menu
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/categories` | รายการหมวดหมู่ |
+| GET | `/api/menu` | รายการเมนูทั้งหมด (filter by category) |
+| GET | `/api/menu/{id}` | รายละเอียดเมนู |
+
+#### Orders (auth required)
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/api/orders` | สร้างออเดอร์ |
+| GET | `/api/orders` | ประวัติออเดอร์ |
+| GET | `/api/orders/{id}` | รายละเอียดออเดอร์ + queue status |
+| GET | `/api/orders/{id}/track` | Real-time tracking data |
+
+#### Coupons
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/api/coupons/validate` | ตรวจสอบคูปอง |
+
+#### Payment
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/api/payments/charge` | ชำระเงินผ่าน Omise |
+
+#### Admin (auth + admin role)
+| Method | Endpoint | Description |
+|---|---|---|
+| CRUD | `/api/admin/menu` | จัดการเมนู |
+| GET | `/api/admin/orders` | ดูออเดอร์ทั้งหมด |
+| PUT | `/api/admin/orders/{id}/status` | อัปเดตสถานะ |
+| CRUD | `/api/admin/coupons` | จัดการคูปอง |
+| GET | `/api/admin/reports` | รายงานยอดขาย |
+
+---
+
+### 5. Real-time Features (Pusher + Laravel Echo)
+
+- **OrderStatusUpdated** event → broadcast บน channel `orders.{userId}`
+- Mobile app subscribe ผ่าน Pusher JS client
+- เมื่อ admin อัปเดตสถานะ → trigger event → mobile app อัปเดต countdown timer + queue position
+
+---
+
+### 6. Security Implementation
+
+| Feature | Implementation |
+|---|---|
+| Rate Limiting | `throttle:5,1` สำหรับ login, `throttle:60,1` สำหรับ API ทั่วไป |
+| Auth | Laravel Sanctum token ทุก protected route |
+| Input Validation | FormRequest classes + server-side price calculation |
+| Payment Safety | คำนวณราคาจาก DB เท่านั้น ไม่รับราคาจาก client |
+| Idempotency | Custom middleware + `idempotency_key` ใน orders table |
+| CORS | Whitelist allowed origins |
+| HTTPS | Enforce ใน production |
+
+---
+
+### 7. Admin Dashboard
+
+ใช้ **Laravel Blade + Alpine.js + Tailwind CSS** (built-in กับ Laravel) เพื่อไม่ต้องเพิ่ม React อีก stack
+
+- Dashboard: แสดงยอดขายวันนี้, ออเดอร์ที่รอ
+- Menu Management: CRUD + upload รูป (Spatie Media Library)
+- Order Management: real-time list, update status
+- Coupon Management: CRUD
+- Sales Reports: กราฟยอดขายรายวัน/รายเดือน
+
+---
+
+## 🗓️ Development Roadmap
+
+| Week | Tasks |
+|---|---|
+| **1–2** | Project setup, Laravel API scaffold, DB migrations, Sanctum auth, Expo project init, navigation structure |
+| **3–4** | Mobile: Login/Register, Menu screen (FlashList + Gluestack UI), Cart (Zustand), API integration (TanStack Query + Axios) |
+| **5** | Order system + Omise payment integration (sandbox), Checkout flow |
+| **6** | Real-time: Pusher setup, countdown timer, queue status, Laravel Echo integration |
+| **7** | Coupons, order history, push notifications (Expo Notifications), map/location (delivery address picker) |
+| **8** | Admin dashboard (Blade), security hardening, Laravel Horizon + Telescope, final testing + deploy |
+
+---
+
+## Verification Plan
+
+### Automated Tests
+1. **Laravel API Tests (PHPUnit):**
+   ```bash
+   cd backend && php artisan test
+   ```
+   - Auth endpoints (register, login, token validation)
+   - Menu CRUD operations
+   - Order creation with price validation (anti-tampering)
+   - Coupon validation logic
+   - Idempotency middleware
+
+2. **Expo App Build Check:**
+   ```bash
+   cd mobile && npx expo start --no-dev
+   ```
+   - ตรวจสอบว่า app build ได้ไม่ error
+
+3. **Laravel Pint (Code Style):**
+   ```bash
+   cd backend && ./vendor/bin/pint --test
+   ```
+
+### Manual Verification
+1. **Mobile App Flow** — เปิด Expo Go → login → ดูเมนู → เพิ่มลงตะกร้า → checkout → ดู order status
+2. **Admin Dashboard** — login เป็น admin → จัดการเมนู → ดูออเดอร์ → อัปเดตสถานะ → ตรวจสอบว่า mobile app ได้รับอัปเดต real-time
+3. **Payment** — ทดสอบ Omise sandbox ชำระเงินด้วย test card
+4. **Security** — ทดสอบ rate limiting (ยิง request เกิน limit), ทดสอบส่งราคาปลอมผ่าน API (ต้อง reject)
+
+> [!TIP]
+> **แนะนำให้เริ่มจาก Phase 1 (Project Setup)** — ตั้ง project structure ทั้ง mobile + backend, ทำ DB migrations, แล้วค่อยไล่ทำทีละ phase ตาม roadmap
